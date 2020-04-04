@@ -1,0 +1,66 @@
+# This is a sample build configuration for JavaScript.
+# Check our guides at https://confluence.atlassian.com/x/14UWN for more examples.
+# Only use spaces to indent your .yml configuration.
+# -----
+# You can specify a custom docker image from Docker Hub as your build environment.
+image: atlassian/default-image:2
+
+pipelines:
+  default:
+    - step:
+        caches:
+          - node
+        script: # Modify the commands below to build your repository.
+          - echo "By default, do nothing. "
+  branches:
+    '{development,test,dev-branch}':
+      - step:
+          script:
+          - echo "Do nothing here. This has to be configured accordingly."
+    master:
+      - step:
+           name: Run Tests
+           script: # Modify the commands below to build your repository.
+             - echo "Do nothing as of now"
+             #- npm install
+             #- npm test
+      - step:
+          name: Deployment in AWS's ECR
+          script: 
+            - export SAMPLE_SERVICE=sample-react-app-service
+            - export SAMPLE_CLUSTER=sample-react-app
+            - export EXECUTION_ROLE=arn:aws:iam::786175676820:role/ecsTaskExecutionRole
+            - export EXECUTION_FAMILY=sample-react-app-task-definition
+            - export SUBNET_GROUP_1=subnet-0d5a51472a8e02ab2
+            - export SUBNET_GROUP_2=subnet-0f39b616361a76844
+            - export SECURITY_GROUP=sg-0117ca12b8b4b8e9d
+            - export ARN_SUBSTRING=arn:aws:ecs:us-east-2:786175676820:task-definition/
+            - export DEFAULT_REGION=us-east-2
+            - export DOCKER_IMAGE_URL=786175676820.dkr.ecr.us-east-2.amazonaws.com/sample-react-app:latest
+            - curl "https://s3.amazonaws.com/aws-cli/awscli-bundle.zip" -o "awscli-bundle.zip"
+            - unzip awscli-bundle.zip
+            - ./awscli-bundle/install -b ~/bin/aws
+            - export PATH=~/bin:$PATH
+            - aws --version
+            - echo "Pinging ACR to get login credentials"
+            - aws configure set aws_access_key_id "${AWS_ACCESS_KEY_ID}"
+            - aws configure set aws_secret_access_key "${AWS_SECRET_ACCESS_KEY}"
+            - aws configure set default_region_name $DEFAULT_REGION
+            - echo ${AWS_ACCESS_KEY_ID}
+            - echo ${AWS_SECRET_ACCESS_KEY}
+            - aws ecr get-login-password --region $DEFAULT_REGION | docker login --username AWS --password-stdin $DOCKER_IMAGE_URL
+#            - docker build -t sample-react-app  .
+#            - docker tag sample-react-app:latest $DOCKER_IMAGE_URL 
+#            - docker push $DOCKER_IMAGE_URL
+            - export TASK_VERSION=$((aws ecs register-task-definition --execution-role-arn $EXECUTION_ROLE --cli-input-json file:///opt/atlassian/pipelines/agent/build/task-definition.json) | grep revision | cut -d ":" -f2 | cut -d "," -f1 | tr -d ' ')
+            - echo $TASK_VERSION
+#            - export RUNNING_TASK=$(aws ecs list-tasks --cluster $SAMPLE_CLUSTER --service-name $SAMPLE_SERVICE | grep $ARN_SUBSTRING | tr -d ' ' | tr -d '"')
+#            - echo $RUNNING_TASK
+#            - aws ecs stop-task --task $RUNNING_TASK --cluster $SAMPLE_CLUSTER    
+            - echo $SAMPLE_CLUSTER
+            - echo $SAMPLE_SERVICE
+            - echo $EXECUTION_FAMILY
+            - aws ecs update-service --cluster $SAMPLE_CLUSTER --service $SAMPLE_SERVICE --task-definition $EXECUTION_FAMILY:$TASK_VERSION
+            - aws ecs run-task --cluster $SAMPLE_CLUSTER --task-definition $EXECUTION_FAMILY:$TASK_VERSION --count 1 --launch-type "FARGATE" --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_GROUP_1,$SUBNET_GROUP_2],securityGroups=[$SECURITY_GROUP]}"
+          services:
+            - docker
